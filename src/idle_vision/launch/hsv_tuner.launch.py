@@ -92,7 +92,10 @@ def generate_launch_description() -> LaunchDescription:
                 "publish_every_n": ParameterValue(
                     LaunchConfiguration("publish_every_n"), value_type=int
                 ),
-                "hsv_ranges_json": LaunchConfiguration("hsv_ranges_json"),
+                "hsv_ranges_json": ParameterValue(
+                    LaunchConfiguration("hsv_ranges_json"),
+                    value_type=str,
+                ),
                 "publish_debug": ParameterValue(
                     LaunchConfiguration("publish_debug"), value_type=bool
                 ),

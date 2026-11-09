@@ -1,4 +1,34 @@
-# idle_ws — 6-DoF 협동로봇 컨트롤 워크스페이스
+# Object-Centric Vision-Language Manipulation
+
+RGB 이미지와 자연어 명령으로 작업 대상과 공간 관계를 해석하고, ROS 2 로봇팔 제어로 연결하는 프로젝트입니다.
+
+| 구성 | 구현 |
+|---|---|
+| Stage 1 | ResNet18 + Transformer 기반 객체 슬롯·위치·방향 인식 |
+| Stage 2 | ColorNet 기반 슬롯 색상 분류·직접 객체 선택 |
+| Stage 4 | 관계 질의와 객체 슬롯의 cross-attention을 통한 대상 선택 |
+| 실행 | STT/Qwen 명령 해석, 좌표 변환, FSM·IK·궤적·그리퍼 제어 |
+
+이 브랜치는 연구실 `good_demo`의 자연어·카메라·Stage4→MuJoCo/FSM 데모 구현을 보존한 대안입니다. 최신 ROS 통합 구현은 개인 저장소의 [`main`](https://github.com/YunBeeeen/idle_ws)을 참고하세요.
+
+[가져온 코드와 실행 준비](docs/UPSTREAM_INTEGRATION.md) · [인식·학습 코드](src/ml/) · [기존 로봇팔 제어](src/phy/README.md)
+
+## 모델·데이터 준비
+
+소스·설정·테스트를 가져왔으며 학습 이미지·가중치·캐시는 분리했습니다. 다운로드할 파일은 고정 커밋과 해시를 담은 [UPSTREAM_ASSETS.json](UPSTREAM_ASSETS.json)에서 확인할 수 있습니다.
+
+```bash
+python3 download_upstream_assets.py --group weights --list
+python3 download_upstream_assets.py --group weights
+python3 -m pip install -r src/ml/requirements.txt
+```
+
+ROS 2 Humble, MuJoCo, STT 및 하드웨어 의존성은 해당 모듈 문서에 따라 별도로 설치합니다. 코드의 보존·통합과 실제 로봇에서의 전체 태스크 성공 검증은 구분합니다.
+
+---
+
+## 기존 로봇팔 제어 문서
+
 
 ROS2 (Humble) 기반 6-DoF 협동로봇 (cobot) 제어용 워크스페이스입니다. CAN 버스로 모터와 통신하고, Pinocchio 모델로 중력보상을 계산하며, MuJoCo로 시뮬레이션 시각화를 지원합니다.
 

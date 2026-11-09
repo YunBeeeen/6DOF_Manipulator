@@ -11,7 +11,6 @@ from xml.sax.saxutils import escape as xml_escape
 
 from lib.common import unpack_ext_id
 from lib.config import DEFAULT_CH
-from lib.limits import feedback_position_violation
 from lib.parse import Feedback, parse_feedback_like_type2
 from lib.runtime import run_with_bus
 from lib.stream_state import load_expected_hz_map
@@ -151,29 +150,6 @@ def _dict_rows_to_table(rows: list[dict]) -> list[list]:
     for row in rows:
         table.append([row.get(h) for h in headers])
     return table
-
-
-def _warn_feedback_position_if_needed(
-    fb: Feedback,
-    last_warn_by_motor: dict[int, float],
-    warn_period_sec: float = 2.0,
-):
-    violation = feedback_position_violation(fb)
-    if violation is None:
-        return
-
-    now = time.monotonic()
-    last_warn = last_warn_by_motor.get(fb.motor_id)
-    if last_warn is not None and now - last_warn < warn_period_sec:
-        return
-    last_warn_by_motor[fb.motor_id] = now
-
-    q_limited, q_min, q_max = violation
-    print(
-        f"[WARN id={fb.motor_id}] feedback pos outside limit: "
-        f"{fb.pos:+.4f} -> {q_limited:+.4f} "
-        f"(limit=[{q_min:+.4f},{q_max:+.4f}])"
-    )
 
 
 def _write_xlsx(path: Path, sheets: list[tuple[str, list[list]]]):
@@ -318,7 +294,6 @@ def main():
         expected_hz_map: dict[int, float] = {}
         overall_rows: list[dict] = []
         motor_rows: list[dict] = []
-        last_limit_warn_by_motor: dict[int, float] = {}
 
         started_wall = time.time()
         started_mono = time.perf_counter()
@@ -530,8 +505,6 @@ def main():
                 if can_filter is not None and fb.motor_id not in can_filter:
                     dropped_other_id += 1
                     continue
-
-                _warn_feedback_position_if_needed(fb, last_limit_warn_by_motor)
 
                 st = motor_stats.setdefault(fb.motor_id, MotorDiag())
                 st.feedback_total += 1

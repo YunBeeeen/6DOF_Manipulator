@@ -33,6 +33,11 @@ COLOR_ALIASES = {
     "파란색": "blue",
     "하늘": "blue",
     "하늘색": "blue",
+    "basket": "basket",
+    "brown": "basket",
+    "바구니": "basket",
+    "갈색": "basket",
+    "갈색바구니": "basket",
 }
 
 SPATIAL_ALIASES = {
@@ -83,7 +88,10 @@ def _normalize_color(value: object) -> Optional[str]:
     key = str(value).strip().lower()
     if key in ("", "none", "null", "any", "all", "전체", "아무거나"):
         return None
-    return COLOR_ALIASES.get(key, key if key in ("red", "green", "blue") else None)
+    return COLOR_ALIASES.get(
+        key,
+        key if key in ("red", "green", "blue", "basket", "brown") else None,
+    )
 
 
 def _normalize_spatial(value: object) -> Optional[str]:
@@ -230,10 +238,11 @@ class QwenBoxSelectorNode(Node):
         prompt = (
             "You parse robot vision commands for colored blocks. "
             "Return JSON only, no markdown. "
-            "Schema: {\"color_key\":\"red|green|blue|null\", "
+            "Schema: {\"color_key\":\"red|green|blue|basket|null\", "
             "\"spatial\":\"left|right|center|nearest|farthest|largest|null\", "
-            "\"object\":\"box|block|null\"}. "
-            "Korean color aliases: 빨강=red, 초록/연두=green, 파랑/하늘색=blue. "
+            "\"object\":\"box|block|basket|null\"}. "
+            "Korean color aliases: 빨강=red, 초록/연두=green, "
+            "파랑/하늘색=blue, 바구니/갈색=basket. "
             "Command: " + command
         )
         body = json.dumps(

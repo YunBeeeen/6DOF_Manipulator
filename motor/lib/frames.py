@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 from .common import pack_ext_id, float_to_u16
 
-# Communication types (RobStride private protocol manuals section 4.1)
+# Communication types (RS02/RS03 manuals section 4.1)
 TYPE00_GET_DEVICE_ID      = 0x00
 TYPE01_OPERATION_CONTROL  = 0x01  # MIT(Operation control)
 TYPE02_FEEDBACK           = 0x02
@@ -37,7 +37,7 @@ TYPE24 = TYPE24_ACTIVE_REPORT
 
 
 # -----------------------------
-# Type01/Type02 operation-control ranges by motor model
+# MIT ranges (RS02 vs RS03)
 # -----------------------------
 
 @dataclass(frozen=True)
@@ -61,14 +61,6 @@ MIT_RS02 = MitRanges(
     KD_MIN=0.0,           KD_MAX=5.0,
 )
 
-MIT_RS00 = MitRanges(
-    P_MIN=-4.0 * math.pi, P_MAX= 4.0 * math.pi,
-    V_MIN=-33.0,          V_MAX= 33.0,
-    T_MIN=-14.0,          T_MAX= 14.0,
-    KP_MIN=0.0,           KP_MAX=500.0,
-    KD_MIN=0.0,           KD_MAX=5.0,
-)
-
 MIT_RS03 = MitRanges(
     P_MIN=-4.0 * math.pi, P_MAX= 4.0 * math.pi,
     V_MIN=-20.0,          V_MAX= 20.0,
@@ -77,39 +69,11 @@ MIT_RS03 = MitRanges(
     KD_MIN=0.0,           KD_MAX=100.0,
 )
 
-MIT_RS05 = MitRanges(
-    P_MIN=-4.0 * math.pi, P_MAX= 4.0 * math.pi,
-    V_MIN=-50.0,          V_MAX= 50.0,
-    T_MIN=-5.5,           T_MAX= 5.5,
-    KP_MIN=0.0,           KP_MAX=500.0,
-    KD_MIN=0.0,           KD_MAX=5.0,
-)
-
+# 너가 말한 조건: RS03은 CAN_ID=2로 고정
 RS03_ID = 2
-MOTOR_MODEL_BY_ID = {
-    1: "RS02",
-    2: "RS03",
-    3: "RS02",
-    4: "RS02",
-    5: "RS00",
-    6: "RS00",
-    7: "RS05",
-}
-
-MIT_RANGES_BY_MODEL = {
-    "RS00": MIT_RS00,
-    "RS02": MIT_RS02,
-    "RS03": MIT_RS03,
-    "RS05": MIT_RS05,
-}
-
-
-def motor_model_for(motor_id: int) -> str:
-    return MOTOR_MODEL_BY_ID.get(int(motor_id), "RS02")
-
 
 def mit_ranges_for(motor_id: int) -> MitRanges:
-    return MIT_RANGES_BY_MODEL[motor_model_for(motor_id)]
+    return MIT_RS03 if int(motor_id) == RS03_ID else MIT_RS02
 
 
 # -----------------------------
@@ -197,8 +161,8 @@ def frame_type18_write_u8(host_id: int, motor_id: int, index: int, value_u8: int
 
 def frame_type01_mit(motor_id: int, p: float, v: float, kp: float, kd: float, t: float) -> tuple[int, bytes]:
     """
-    Type01 operation control:
-      - ID.data2(16bit) = torque u16 mapped by motor model
+    Type01 (MIT):
+      - ID.data2(16bit) = torque u16 mapped (range depends on motor_id -> RS02/RS03)
       - data[0:2]=pos, [2:4]=vel, [4:6]=kp, [6:8]=kd (big-endian)
     """
     r = mit_ranges_for(motor_id)

@@ -71,16 +71,29 @@ class CollisionChecker:
             for i, obj in enumerate(self.geom_model.geometryObjects)
             if "cage" in obj.name.lower()
         )
-        # Collision pair indices that involve at least one cage geometry object
         self._cage_pair_indices: list[int] = [
             k
             for k, pair in enumerate(self.geom_model.collisionPairs)
             if pair.first in self._cage_geom_ids or pair.second in self._cage_geom_ids
         ]
 
+        # Floor geometry object indices (by name)
+        self._floor_geom_ids: frozenset[int] = frozenset(
+            i
+            for i, obj in enumerate(self.geom_model.geometryObjects)
+            if "floor" in obj.name.lower()
+        )
+        self._floor_pair_indices: list[int] = [
+            k
+            for k, pair in enumerate(self.geom_model.collisionPairs)
+            if pair.first in self._floor_geom_ids or pair.second in self._floor_geom_ids
+        ]
+
         self.geom_data = pin.GeometryData(self.geom_model)
         self._cage_enabled = False
         self.set_cage_enabled(cage_enabled)
+        self._floor_enabled = False
+        self.set_floor_enabled(False)
 
     def set_cage_enabled(self, enabled: bool) -> None:
         """Toggle cage collision pairs on or off (thread-safe)."""
@@ -93,13 +106,25 @@ class CollisionChecker:
     def cage_enabled(self) -> bool:
         return self._cage_enabled
 
+    def set_floor_enabled(self, enabled: bool) -> None:
+        """Toggle floor collision pairs on or off (thread-safe)."""
+        with self._lock:
+            self._floor_enabled = enabled
+            for k in self._floor_pair_indices:
+                self.geom_data.activeCollisionPairs[k] = enabled
+
+    @property
+    def floor_enabled(self) -> bool:
+        return self._floor_enabled
+
     @property
     def n_pairs_total(self) -> int:
         return self._n_pairs_total
 
     @property
     def n_pairs_active(self) -> int:
-        return self._n_pairs_active
+        with self._lock:
+            return sum(bool(v) for v in self.geom_data.activeCollisionPairs)
 
     def check(
         self,
@@ -128,15 +153,25 @@ class CollisionChecker:
 
         Computes all pairs (no early-exit), so slower than ``check()``.
         """
-        self.check(q_by_motor, stop_at_first=False)
-        out: list[tuple[str, str]] = []
-        for k, result in enumerate(self.geom_data.collisionResults):
-            if result.isCollision():
-                pair = self.geom_model.collisionPairs[k]
-                obj_a = self.geom_model.geometryObjects[pair.first]
-                obj_b = self.geom_model.geometryObjects[pair.second]
-                out.append((obj_a.name, obj_b.name))
-        return out
+        with self._lock:
+            with self.robot._lock:
+                self.robot._fill_q_buf(q_by_motor)
+                pin.computeCollisions(
+                    self.robot.model,
+                    self.robot.data,
+                    self.geom_model,
+                    self.geom_data,
+                    self.robot._q_buf,
+                    stop_at_first_collision=False,
+                )
+            out: list[tuple[str, str]] = []
+            for k, result in enumerate(self.geom_data.collisionResults):
+                if result.isCollision():
+                    pair = self.geom_model.collisionPairs[k]
+                    obj_a = self.geom_model.geometryObjects[pair.first]
+                    obj_b = self.geom_model.geometryObjects[pair.second]
+                    out.append((obj_a.name, obj_b.name))
+            return out
 
     def check_trajectory(
         self,
