@@ -107,7 +107,10 @@ def generate_launch_description() -> LaunchDescription:
                 "depth_topic": LaunchConfiguration("depth_topic"),
                 "camera_info_topic": LaunchConfiguration("camera_info_topic"),
                 "target_color": LaunchConfiguration("target_color"),
-                "hsv_ranges_json": LaunchConfiguration("hsv_ranges_json"),
+                "hsv_ranges_json": ParameterValue(
+                    LaunchConfiguration("hsv_ranges_json"),
+                    value_type=str,
+                ),
                 "min_area_px": ParameterValue(
                     LaunchConfiguration("min_area_px"), value_type=int
                 ),

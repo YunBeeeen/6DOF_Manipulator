@@ -4,7 +4,7 @@
 
 from dataclasses import dataclass
 from .common import unpack_ext_id, u16_to_float
-from .frames import mit_ranges_for
+from .frames import MIT_RS02, MIT_RS03, RS03_ID
 
 @dataclass
 class Feedback:
@@ -24,7 +24,7 @@ def parse_feedback_like_type2(arb_id: int, data: bytes) -> Feedback | None:
         return None
 
     motor_id = data2 & 0xFF
-    spec = mit_ranges_for(motor_id)
+    spec = MIT_RS03 if motor_id == RS03_ID else MIT_RS02
 
     flags = (data2 >> 8) & 0xFF
     mode_status = (flags >> 6) & 0x03

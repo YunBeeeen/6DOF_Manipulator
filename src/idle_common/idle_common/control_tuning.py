@@ -27,16 +27,22 @@ DEFAULT_STATE_FILE = "/tmp/idle_control_gate_state.json"
 CONTROL_TUNING_KEYS = {
     "kp",
     "kd",
+    "ki",
     "q_des",
     "qd_des",
     "tau_ff",
     "gravity_scale",
     "gravity_bias",
     "inertia_ff_scale",
+    "friction_ff",
     "v_max",
     "a_max",
     "profile_sharpness",
     "goal_mode",
+    "gain_mode",
+    "omega_n_target",
+    "zeta_target",
+    "gain_lpf_alpha",
 }
 
 
@@ -136,8 +142,14 @@ def _validate_tuning_value(key: str, value: Any):
     if not isinstance(value, (int, float)):
         raise ValueError(f"{key} must be numeric")
     f = float(value)
-    if key in {"kp", "kd"} and f < 0:
+    if key in {"kp", "kd", "ki"} and f < 0:
         raise ValueError(f"{key} must be >= 0")
+    if key == "gain_mode" and f not in {0.0, 1.0}:
+        raise ValueError("gain_mode must be 0 or 1")
+    if key in {"omega_n_target", "zeta_target"} and f <= 0.0:
+        raise ValueError(f"{key} must be > 0")
+    if key == "gain_lpf_alpha" and not (0.0 <= f <= 1.0):
+        raise ValueError("gain_lpf_alpha must be between 0 and 1")
 
 
 def set_control_tuning(motor_ids: list[int], updates: dict[str, float]) -> Path:

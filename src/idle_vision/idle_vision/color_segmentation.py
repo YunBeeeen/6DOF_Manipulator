@@ -12,17 +12,30 @@ HsvRange = tuple[tuple[int, int, int], tuple[int, int, int]]
 
 
 HSV_PRESETS: dict[str, list[HsvRange]] = {
-    "red": [((0, 130, 80), (12, 255, 190)), ((170, 130, 80), (180, 255, 190))],
+    "red": [((0, 90, 70), (12, 255, 255)), ((160, 90, 70), (180, 255, 255))],
     "orange": [((5, 80, 40), (25, 255, 255))],
     "yellow": [((20, 70, 50), (38, 255, 255))],
-    "green": [((28, 90, 65), (58, 230, 150))],
-    "blue": [((85, 130, 110), (112, 255, 190))],
+    "basket": [((10, 35, 120), (34, 160, 255))],
+    "brown": [((10, 40, 120), (34, 90, 200))],
+    "green": [((30, 100, 120), (55, 180, 220))],
+    "blue": [((90, 100, 150), (105, 255, 255))],
     "purple": [((128, 50, 35), (165, 255, 255))],
     "white": [((0, 0, 165), (180, 70, 255))],
     "black": [((0, 0, 0), (180, 255, 70))],
 }
 
 AUTO_TARGET_COLORS = ("red", "green", "blue")
+SCENE_TARGET_COLORS = (*AUTO_TARGET_COLORS, "basket")
+TARGET_COLOR_ALIASES = {
+    "bascket": "basket",
+    "basckt": "basket",
+    "baskt": "basket",
+}
+
+
+def _normalize_target_key(target_color: str) -> str:
+    key = target_color.strip().lower()
+    return TARGET_COLOR_ALIASES.get(key, key)
 
 
 def _hsv_mask(
@@ -61,9 +74,9 @@ def color_ratio_mask(color_bgr: np.ndarray, color_key: str) -> np.ndarray:
     if key == "red":
         keep = (r_ratio >= 0.45) & ((r - g) >= 20.0) & ((r - b) >= 20.0)
     elif key == "green":
-        keep = (g_ratio >= 0.33) & ((g - b) >= 5.0) & ((g - r) >= 2.0)
+        keep = (g_ratio >= 0.34) & ((g - b) >= 10.0) & ((g - r) >= -5.0)
     else:
-        keep = (b_ratio >= 0.38) & ((b - r) >= 20.0) & ((b - g) >= -20.0)
+        keep = (b_ratio >= 0.36) & ((b - r) >= 20.0) & ((b - g) >= -10.0)
 
     return np.where(keep, 255, 0).astype(np.uint8)
 
@@ -82,13 +95,11 @@ def make_color_mask(
     return mask
 
 
-def contour_color_stats(
+def mask_color_stats(
     color_bgr: np.ndarray,
     hsv: np.ndarray,
-    contour,
+    mask: np.ndarray,
 ) -> Optional[dict[str, float]]:
-    mask = np.zeros(hsv.shape[:2], dtype=np.uint8)
-    cv2.drawContours(mask, [contour], -1, 255, thickness=cv2.FILLED)
     hsv_values = hsv[mask > 0]
     bgr_values = color_bgr[mask > 0]
     if hsv_values.size == 0 or bgr_values.size == 0:
@@ -111,6 +122,16 @@ def contour_color_stats(
     }
 
 
+def contour_color_stats(
+    color_bgr: np.ndarray,
+    hsv: np.ndarray,
+    contour,
+) -> Optional[dict[str, float]]:
+    mask = np.zeros(hsv.shape[:2], dtype=np.uint8)
+    cv2.drawContours(mask, [contour], -1, 255, thickness=cv2.FILLED)
+    return mask_color_stats(color_bgr, hsv, mask)
+
+
 def passes_color_quality(color_key: str, stats: Optional[dict[str, float]]) -> bool:
     """Reject low-quality color blobs after broad HSV masking.
 
@@ -127,31 +148,41 @@ def passes_color_quality(color_key: str, stats: Optional[dict[str, float]]) -> b
 
     if key == "blue":
         return (
-            85.0 <= stats["h_median"] <= 112.0
-            and 150.0 <= s <= 255.0
-            and 115.0 <= stats["v_median"] <= 190.0
-            and stats["b_ratio"] >= 0.35
-            and (b - r) >= 15.0
-            and (b - g) >= -25.0
+            84.0 <= stats["h_median"] <= 118.0
+            and 75.0 <= s <= 255.0
+            and 90.0 <= stats["v_median"] <= 255.0
+            and stats["b_ratio"] >= 0.36
+            and (b - r) >= 20.0
+            and (b - g) >= -10.0
         )
     if key == "green":
         return (
-            28.0 <= stats["h_median"] <= 58.0
-            and 100.0 <= s <= 230.0
-            and 65.0 <= stats["v_median"] <= 150.0
-            and stats["g_ratio"] >= 0.32
-            and (g - b) >= 3.0
-            and (g - r) >= 0.0
+            28.0 <= stats["h_median"] <= 75.0
+            and 50.0 <= s <= 255.0
+            and 55.0 <= stats["v_median"] <= 255.0
+            and stats["g_ratio"] >= 0.34
+            and (g - b) >= 10.0
+            and (g - r) >= -5.0
         )
     if key == "red":
         hue = stats["h_median"]
         return (
-            (hue <= 18.0 or hue >= 162.0)
-            and 145.0 <= s <= 255.0
-            and 80.0 <= stats["v_median"] <= 190.0
-            and stats["r_ratio"] >= 0.42
-            and (r - g) >= 15.0
+            (hue <= 12.0 or hue >= 160.0)
+            and 90.0 <= s <= 255.0
+            and 70.0 <= stats["v_median"] <= 255.0
+            and stats["r_ratio"] >= 0.45
+            and (r - g) >= 20.0
+            and (r - b) >= 20.0
+        )
+    if key in ("basket", "brown"):
+        return (
+            10.0 <= stats["h_median"] <= 34.0
+            and 35.0 <= s <= 160.0
+            and 120.0 <= stats["v_median"] <= 255.0
+            and stats["r_ratio"] >= 0.32
+            and stats["g_ratio"] >= 0.28
             and (r - b) >= 15.0
+            and (g - b) >= 5.0
         )
     return True
 
@@ -199,7 +230,7 @@ def parse_hsv_ranges(
     if hsv_ranges_json.strip():
         return parse_hsv_ranges_json(hsv_ranges_json)
 
-    key = target_color.strip().lower()
+    key = _normalize_target_key(target_color)
     if key in ("", "auto"):
         key = AUTO_TARGET_COLORS[0]
     if key not in HSV_PRESETS:
@@ -214,17 +245,24 @@ def resolve_detector_ranges(
     hsv_ranges_json: str,
 ) -> dict[str, list[HsvRange]]:
     if hsv_ranges_json.strip():
-        key = target_color.strip().lower()
+        key = _normalize_target_key(target_color)
         if key in ("", "auto", "all"):
             key = "custom"
         return {key: parse_hsv_ranges_json(hsv_ranges_json)}
 
-    key = target_color.strip().lower()
+    key = _normalize_target_key(target_color)
     if key in ("", "auto"):
         return {color: HSV_PRESETS[color] for color in AUTO_TARGET_COLORS}
+    if key in ("blocks", "rgb"):
+        return {color: HSV_PRESETS[color] for color in AUTO_TARGET_COLORS}
+    if key in ("scene", "blocks_basket", "rgb_basket"):
+        return {color: HSV_PRESETS[color] for color in SCENE_TARGET_COLORS}
     if key == "all":
         return dict(HSV_PRESETS)
     if key not in HSV_PRESETS:
-        known = ", ".join(["auto", "all"] + sorted(HSV_PRESETS.keys()))
+        known = ", ".join(
+            ["auto", "blocks", "rgb", "scene", "blocks_basket", "rgb_basket", "all"]
+            + sorted(HSV_PRESETS.keys())
+        )
         raise ValueError(f"unknown target_color '{target_color}'. Known: {known}")
     return {key: HSV_PRESETS[key]}

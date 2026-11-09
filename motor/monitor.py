@@ -1,12 +1,10 @@
 """Type02 피드백과 Type24(active report) 프레임을 콘솔에 실시간 출력하는 경량 모니터."""
 
 import argparse
-import time
 
 from lib.common import unpack_ext_id
 from lib.config import DEFAULT_CH
 from lib.frames import TYPE02, TYPE24
-from lib.limits import feedback_position_violation
 from lib.parse import parse_feedback_like_type2
 from lib.runtime import run_with_bus
 
@@ -31,25 +29,6 @@ def _looks_type24_active_report_cmd(data: bytes) -> bool:
     )
 
 
-def _warn_feedback_position_if_needed(fb, last_warn_by_motor: dict[int, float], warn_period_sec: float = 2.0):
-    violation = feedback_position_violation(fb)
-    if violation is None:
-        return
-
-    now = time.monotonic()
-    last_warn = last_warn_by_motor.get(fb.motor_id)
-    if last_warn is not None and now - last_warn < warn_period_sec:
-        return
-    last_warn_by_motor[fb.motor_id] = now
-
-    q_limited, q_min, q_max = violation
-    print(
-        f"[WARN id={fb.motor_id}] feedback pos outside limit: "
-        f"{fb.pos:+.4f} -> {q_limited:+.4f} "
-        f"(limit=[{q_min:+.4f},{q_max:+.4f}])"
-    )
-
-
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--ch", default=DEFAULT_CH)
@@ -65,7 +44,6 @@ def main():
 
     def _run(bus):
         cnt = 0
-        last_limit_warn_by_motor: dict[int, float] = {}
         while True:
             msg = bus.recv(timeout=1.0)
             if msg is None:
@@ -79,8 +57,6 @@ def main():
                     continue
                 if can_filter is not None and fb.motor_id not in can_filter:
                     continue
-
-                _warn_feedback_position_if_needed(fb, last_limit_warn_by_motor)
 
                 cnt += 1
                 if cnt % args.every != 0:
@@ -124,8 +100,6 @@ def main():
                     continue
                 if can_filter is not None and fb.motor_id not in can_filter and motor_id_d1 not in can_filter:
                     continue
-
-                _warn_feedback_position_if_needed(fb, last_limit_warn_by_motor)
 
                 cnt += 1
                 if cnt % args.every != 0:

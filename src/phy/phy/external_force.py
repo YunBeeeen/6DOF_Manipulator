@@ -1,10 +1,7 @@
 """External-force estimation via torque residual with hysteresis state machine.
 
 Pipeline per tick:
-    default:
-        τ_expected[m] = kp·(q_des-q) + kd·(qd_des-qd) + τ_ff
-    optional gravity_plus_ff mode:
-        τ_expected[m] = τ_gravity[m] + kp·(q_des-q) + kd·(qd_des-qd) + τ_ff
+    τ_expected[m] = τ_gravity[m] + kp·(q_des-q) + kd·(qd_des-qd) + τ_ff
     τ_residual[m] = τ_measured[m] - τ_expected[m]
     τ_external[m] = τ_residual[m] - offset[m]                # offset from calibrate()
 
@@ -41,7 +38,6 @@ class ExternalForceEstimator:
         confirm_ticks: int = 5,
         velocity_threshold_gain: float = 0.5,
         disabled_motors: frozenset[int] = frozenset({7}),
-        expected_torque_mode: str = "command_total",
     ):
         if not (0.0 <= threshold_slow <= threshold_pause <= threshold_abort):
             raise ValueError("thresholds must satisfy 0 ≤ slow ≤ pause ≤ abort")
@@ -55,9 +51,6 @@ class ExternalForceEstimator:
         self.confirm_ticks = int(confirm_ticks)
         self.velocity_threshold_gain = float(velocity_threshold_gain)
         self.disabled_motors = frozenset(int(m) for m in disabled_motors)
-        self.expected_torque_mode = str(expected_torque_mode).strip()
-        if self.expected_torque_mode not in {"command_total", "gravity_plus_ff"}:
-            raise ValueError("expected_torque_mode must be 'command_total' or 'gravity_plus_ff'")
 
         self.offset: dict[int, float] = {m: 0.0 for m in robot_model.ordered_motor_ids}
         self._active_motor_ids = tuple(
@@ -114,7 +107,7 @@ class ExternalForceEstimator:
             (tau_external_by_motor, status) where status is one of
             ``"clear" | "slow" | "pause" | "abort"``.
         """
-        gravity = self.robot.gravity_torque(q_by_motor) if self.expected_torque_mode == "gravity_plus_ff" else {}
+        gravity = self.robot.gravity_torque(q_by_motor)
         tau_ext: dict[int, float] = {}
         for motor_id in self.robot.ordered_motor_ids:
             cmd = last_cmd_by_motor.get(motor_id, {})
@@ -126,9 +119,7 @@ class ExternalForceEstimator:
             kd = float(cmd.get("kd", 0.0))
             tau_ff = float(cmd.get("tau_ff", 0.0))
 
-            tau_expected = kp * (q_des - q) + kd * (qd_des - qd) + tau_ff
-            if self.expected_torque_mode == "gravity_plus_ff":
-                tau_expected += gravity[motor_id]
+            tau_expected = gravity[motor_id] + kp * (q_des - q) + kd * (qd_des - qd) + tau_ff
             tau_meas = float(tau_measured_by_motor.get(motor_id, 0.0))
             tau_ext[motor_id] = tau_meas - tau_expected - self.offset[motor_id]
 

@@ -33,6 +33,7 @@ setup(
             "object_depth_node = idle_vision.object_depth_node:main",
             "qwen_box_selector_node = idle_vision.qwen_box_selector_node:main",
             "voice_command_node = idle_vision.voice_command_node:main",
+            "compute_homography = idle_vision.compute_homography:main",
         ],
     },
 )

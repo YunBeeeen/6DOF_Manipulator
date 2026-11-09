@@ -22,7 +22,7 @@ from tf2_ros import Buffer, TransformException, TransformListener
 from visualization_msgs.msg import Marker, MarkerArray
 
 from .color_segmentation import (
-    contour_color_stats,
+    mask_color_stats,
     make_color_mask,
     passes_color_quality,
     resolve_detector_ranges,
@@ -33,6 +33,8 @@ COLOR_RGBA = {
     "red": (1.0, 0.05, 0.05, 1.0),
     "orange": (1.0, 0.45, 0.0, 1.0),
     "yellow": (1.0, 0.9, 0.0, 1.0),
+    "basket": (0.7, 0.38, 0.12, 1.0),
+    "brown": (0.7, 0.38, 0.12, 1.0),
     "green": (0.05, 0.85, 0.1, 1.0),
     "blue": (0.1, 0.35, 1.0, 1.0),
     "purple": (0.65, 0.2, 1.0, 1.0),
@@ -88,6 +90,37 @@ def _rect_aspect_ratio(rect) -> float:
     short = max(min(float(width), float(height)), 1.0)
     long = max(float(width), float(height))
     return long / short
+
+
+def _rect_long_short_px(rect) -> tuple[float, float]:
+    (_, _), (width, height), _ = rect
+    return max(float(width), float(height)), max(min(float(width), float(height)), 1.0)
+
+
+def _rect_points_from_center_yaw(
+    center_px: tuple[float, float],
+    long_px: float,
+    short_px: float,
+    yaw_deg: float,
+) -> list[list[int]]:
+    cx, cy = center_px
+    yaw_rad = math.radians(yaw_deg)
+    ux = math.cos(yaw_rad)
+    uy = math.sin(yaw_rad)
+    vx = -uy
+    vy = ux
+    half_long = long_px * 0.5
+    half_short = short_px * 0.5
+    points = []
+    for sign_long, sign_short in ((-1, -1), (-1, 1), (1, 1), (1, -1)):
+        x = cx + sign_long * ux * half_long + sign_short * vx * half_short
+        y = cy + sign_long * uy * half_long + sign_short * vy * half_short
+        points.append([int(round(x)), int(round(y))])
+    return points
+
+
+def _is_basket_key(color_key: str) -> bool:
+    return color_key.lower() in ("basket", "brown")
 
 
 def _rotate_vector(q, xyz: tuple[float, float, float]) -> tuple[float, float, float]:
@@ -214,6 +247,13 @@ class BoxPoseNode(Node):
         self.declare_parameter("min_area_px", 500)
         self.declare_parameter("max_area_px", 0)
         self.declare_parameter("morph_kernel_size", 5)
+        self.declare_parameter("basket_morph_close_kernel_size", 51)
+        self.declare_parameter("basket_min_area_px", 6000)
+        self.declare_parameter("basket_max_area_px", 150000)
+        self.declare_parameter("basket_min_bbox_width_px", 50)
+        self.declare_parameter("basket_min_bbox_height_px", 70)
+        self.declare_parameter("basket_min_aspect_ratio", 1.05)
+        self.declare_parameter("basket_max_aspect_ratio", 5.0)
         self.declare_parameter("depth_erode_px", 3)
         self.declare_parameter("depth_scale", 0.001)
         self.declare_parameter("min_depth_m", 0.05)
@@ -222,9 +262,12 @@ class BoxPoseNode(Node):
         self.declare_parameter("depth_match_timeout_s", 0.25)
         self.declare_parameter("nms_iou_threshold", 0.4)
         self.declare_parameter("use_color_ratio_mask", True)
+        self.declare_parameter("use_color_quality_check", True)
         self.declare_parameter("use_depth_candidate_mask", True)
         self.declare_parameter("yaw_stabilize_aspect_ratio", 1.15)
         self.declare_parameter("yaw_track_max_px", 80.0)
+        self.declare_parameter("pose_smoothing_alpha", 0.08)
+        self.declare_parameter("yaw_smoothing_alpha", 0.05)
         self.declare_parameter("max_boxes", 20)
         self.declare_parameter("sort_by", "x")
         self.declare_parameter("require_depth", True)
@@ -247,6 +290,23 @@ class BoxPoseNode(Node):
         self._min_area_px = int(self.get_parameter("min_area_px").value)
         self._max_area_px = int(self.get_parameter("max_area_px").value)
         self._morph_kernel_size = int(self.get_parameter("morph_kernel_size").value)
+        self._basket_morph_close_kernel_size = int(
+            self.get_parameter("basket_morph_close_kernel_size").value
+        )
+        self._basket_min_area_px = int(self.get_parameter("basket_min_area_px").value)
+        self._basket_max_area_px = int(self.get_parameter("basket_max_area_px").value)
+        self._basket_min_bbox_width_px = int(
+            self.get_parameter("basket_min_bbox_width_px").value
+        )
+        self._basket_min_bbox_height_px = int(
+            self.get_parameter("basket_min_bbox_height_px").value
+        )
+        self._basket_min_aspect_ratio = float(
+            self.get_parameter("basket_min_aspect_ratio").value
+        )
+        self._basket_max_aspect_ratio = float(
+            self.get_parameter("basket_max_aspect_ratio").value
+        )
         self._depth_erode_px = int(self.get_parameter("depth_erode_px").value)
         self._depth_scale = float(self.get_parameter("depth_scale").value)
         self._min_depth_m = float(self.get_parameter("min_depth_m").value)
@@ -259,6 +319,9 @@ class BoxPoseNode(Node):
         self._use_color_ratio_mask = bool(
             self.get_parameter("use_color_ratio_mask").value
         )
+        self._use_color_quality_check = bool(
+            self.get_parameter("use_color_quality_check").value
+        )
         self._use_depth_candidate_mask = bool(
             self.get_parameter("use_depth_candidate_mask").value
         )
@@ -266,6 +329,12 @@ class BoxPoseNode(Node):
             self.get_parameter("yaw_stabilize_aspect_ratio").value
         )
         self._yaw_track_max_px = float(self.get_parameter("yaw_track_max_px").value)
+        self._pose_smoothing_alpha = float(
+            self.get_parameter("pose_smoothing_alpha").value
+        )
+        self._yaw_smoothing_alpha = float(
+            self.get_parameter("yaw_smoothing_alpha").value
+        )
         self._max_boxes = int(self.get_parameter("max_boxes").value)
         self._sort_by = str(self.get_parameter("sort_by").value).strip().lower()
         self._require_depth = bool(self.get_parameter("require_depth").value)
@@ -289,6 +358,21 @@ class BoxPoseNode(Node):
             raise ValueError("max_area_px must be >= 0")
         if self._morph_kernel_size < 0:
             raise ValueError("morph_kernel_size must be >= 0")
+        if self._basket_morph_close_kernel_size < 0:
+            raise ValueError("basket_morph_close_kernel_size must be >= 0")
+        if self._basket_min_area_px < 0 or self._basket_max_area_px < 0:
+            raise ValueError("basket area limits must be >= 0")
+        if (
+            self._basket_min_bbox_width_px < 0
+            or self._basket_min_bbox_height_px < 0
+        ):
+            raise ValueError("basket bbox limits must be >= 0")
+        if self._basket_min_aspect_ratio <= 0.0:
+            raise ValueError("basket_min_aspect_ratio must be > 0")
+        if self._basket_max_aspect_ratio < self._basket_min_aspect_ratio:
+            raise ValueError(
+                "basket_max_aspect_ratio must be >= basket_min_aspect_ratio"
+            )
         if self._depth_erode_px < 0:
             raise ValueError("depth_erode_px must be >= 0")
         if not 0.0 <= self._depth_percentile <= 100.0:
@@ -299,6 +383,10 @@ class BoxPoseNode(Node):
             raise ValueError("yaw_stabilize_aspect_ratio must be >= 1.0")
         if self._yaw_track_max_px < 0.0:
             raise ValueError("yaw_track_max_px must be >= 0")
+        if not 0.0 < self._pose_smoothing_alpha <= 1.0:
+            raise ValueError("pose_smoothing_alpha must be in (0, 1]")
+        if not 0.0 < self._yaw_smoothing_alpha <= 1.0:
+            raise ValueError("yaw_smoothing_alpha must be in (0, 1]")
         if self._max_boxes <= 0:
             raise ValueError("max_boxes must be > 0")
 
@@ -520,8 +608,18 @@ class BoxPoseNode(Node):
 
         for color_key, ranges in self._detector_ranges.items():
             mask = self._make_mask(color_bgr, hsv, color_key, ranges)
+            stats_mask = mask
+            if _is_basket_key(color_key) and self._basket_morph_close_kernel_size > 1:
+                stats_mask = self._make_mask(
+                    color_bgr,
+                    hsv,
+                    color_key,
+                    ranges,
+                    basket_close=False,
+                )
             if depth_candidate_mask is not None:
                 mask = cv2.bitwise_and(mask, depth_candidate_mask)
+                stats_mask = cv2.bitwise_and(stats_mask, depth_candidate_mask)
             accepted_mask = np.zeros(mask.shape, dtype=np.uint8)
             contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
             for contour in contours:
@@ -530,8 +628,15 @@ class BoxPoseNode(Node):
                     continue
                 if self._max_area_px > 0 and area > self._max_area_px:
                     continue
-                color_stats = contour_color_stats(color_bgr, hsv, contour)
-                if not passes_color_quality(color_key, color_stats):
+
+                component_mask = np.zeros(mask.shape, dtype=np.uint8)
+                cv2.drawContours(component_mask, [contour], -1, 255, thickness=cv2.FILLED)
+                component_mask = cv2.bitwise_and(component_mask, stats_mask)
+                color_stats = mask_color_stats(color_bgr, hsv, component_mask)
+                if (
+                    self._use_color_quality_check
+                    and not passes_color_quality(color_key, color_stats)
+                ):
                     continue
 
                 x, y, w, h = cv2.boundingRect(contour)
@@ -540,7 +645,16 @@ class BoxPoseNode(Node):
                 rect_points_i = np.asarray(rect_points, dtype=np.int32)
                 yaw_deg = _rect_yaw_deg(rect)
                 aspect_ratio = _rect_aspect_ratio(rect)
-                cv2.drawContours(accepted_mask, [contour], -1, 255, thickness=cv2.FILLED)
+                rect_long_px, rect_short_px = _rect_long_short_px(rect)
+                if not self._passes_basket_geometry(
+                    color_key=color_key,
+                    area=area,
+                    bbox=(int(x), int(y), int(w), int(h)),
+                    aspect_ratio=float(aspect_ratio),
+                ):
+                    continue
+
+                accepted_mask = cv2.bitwise_or(accepted_mask, component_mask)
                 raw_candidates.append(
                     {
                         "color_key": color_key,
@@ -552,6 +666,8 @@ class BoxPoseNode(Node):
                         "yaw_deg": float(yaw_deg),
                         "yaw_rad": float(math.radians(yaw_deg)),
                         "aspect_ratio": float(aspect_ratio),
+                        "rect_long_px": float(rect_long_px),
+                        "rect_short_px": float(rect_short_px),
                         "rect_points_px": rect_points_i.tolist(),
                         "color_stats": color_stats,
                     }
@@ -573,6 +689,32 @@ class BoxPoseNode(Node):
         self._stabilize_yaws(kept)
         return kept, combined_mask
 
+    def _passes_basket_geometry(
+        self,
+        *,
+        color_key: str,
+        area: float,
+        bbox: tuple[int, int, int, int],
+        aspect_ratio: float,
+    ) -> bool:
+        if not _is_basket_key(color_key):
+            return True
+
+        _, _, width, height = bbox
+        if area < float(self._basket_min_area_px):
+            return False
+        if self._basket_max_area_px > 0 and area > float(self._basket_max_area_px):
+            return False
+        if width < self._basket_min_bbox_width_px:
+            return False
+        if height < self._basket_min_bbox_height_px:
+            return False
+        if aspect_ratio < self._basket_min_aspect_ratio:
+            return False
+        if aspect_ratio > self._basket_max_aspect_ratio:
+            return False
+        return True
+
     def _stabilize_yaws(self, candidates: list[dict]) -> None:
         previous_tracks = self._previous_yaw_tracks
         used_previous: set[int] = set()
@@ -593,8 +735,23 @@ class BoxPoseNode(Node):
                     best_dist = dist
                     best_index = index
 
-            if best_index >= 0 and best_dist <= self._yaw_track_max_px:
-                previous_yaw = float(previous_tracks[best_index]["yaw_deg"])
+            track_max_px = self._yaw_track_max_px
+            if _is_basket_key(candidate["color_key"]):
+                track_max_px = max(
+                    track_max_px,
+                    float(candidate["rect_long_px"]) * 0.75,
+                )
+
+            if best_index >= 0 and best_dist <= track_max_px:
+                previous = previous_tracks[best_index]
+                previous_yaw = float(previous["yaw_deg"])
+                prev_center_x, prev_center_y = previous["center_px"]
+                prev_long_px = float(
+                    previous.get("rect_long_px", candidate["rect_long_px"])
+                )
+                prev_short_px = float(
+                    previous.get("rect_short_px", candidate["rect_short_px"])
+                )
                 yaw_options = [float(candidate["yaw_deg"])]
                 if candidate["aspect_ratio"] <= self._yaw_stabilize_aspect_ratio:
                     yaw_options.append(
@@ -604,8 +761,39 @@ class BoxPoseNode(Node):
                     yaw_options,
                     key=lambda yaw: abs(_angle_delta_deg(yaw, previous_yaw)),
                 )
+                center_x = (
+                    prev_center_x * (1.0 - self._pose_smoothing_alpha)
+                    + center_x * self._pose_smoothing_alpha
+                )
+                center_y = (
+                    prev_center_y * (1.0 - self._pose_smoothing_alpha)
+                    + center_y * self._pose_smoothing_alpha
+                )
+                yaw_deg = _normalize_box_yaw_deg(
+                    previous_yaw
+                    + self._yaw_smoothing_alpha
+                    * _angle_delta_deg(yaw_deg, previous_yaw)
+                )
+                candidate["center_px"] = (float(center_x), float(center_y))
                 candidate["yaw_deg"] = float(yaw_deg)
                 candidate["yaw_rad"] = float(math.radians(yaw_deg))
+                if "rect_long_px" in candidate and "rect_short_px" in candidate:
+                    rect_long_px = (
+                        prev_long_px * (1.0 - self._pose_smoothing_alpha)
+                        + float(candidate["rect_long_px"]) * self._pose_smoothing_alpha
+                    )
+                    rect_short_px = (
+                        prev_short_px * (1.0 - self._pose_smoothing_alpha)
+                        + float(candidate["rect_short_px"]) * self._pose_smoothing_alpha
+                    )
+                    candidate["rect_long_px"] = float(rect_long_px)
+                    candidate["rect_short_px"] = float(rect_short_px)
+                    candidate["rect_points_px"] = _rect_points_from_center_yaw(
+                        candidate["center_px"],
+                        rect_long_px,
+                        rect_short_px,
+                        float(yaw_deg),
+                    )
                 used_previous.add(best_index)
 
             new_tracks.append(
@@ -613,6 +801,8 @@ class BoxPoseNode(Node):
                     "color_key": candidate["color_key"],
                     "center_px": candidate["center_px"],
                     "yaw_deg": candidate["yaw_deg"],
+                    "rect_long_px": candidate.get("rect_long_px", 0.0),
+                    "rect_short_px": candidate.get("rect_short_px", 0.0),
                 }
             )
 
@@ -624,6 +814,8 @@ class BoxPoseNode(Node):
         hsv: np.ndarray,
         color_key: str,
         ranges: list[tuple[tuple[int, int, int], tuple[int, int, int]]],
+        *,
+        basket_close: bool = True,
     ) -> np.ndarray:
         mask = make_color_mask(
             color_bgr,
@@ -636,7 +828,16 @@ class BoxPoseNode(Node):
         if self._morph_kernel_size > 1:
             k = self._morph_kernel_size
             kernel = np.ones((k, k), dtype=np.uint8)
-            mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+            if not _is_basket_key(color_key):
+                mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+            mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+        if (
+            basket_close
+            and _is_basket_key(color_key)
+            and self._basket_morph_close_kernel_size > 1
+        ):
+            k = self._basket_morph_close_kernel_size
+            kernel = np.ones((k, k), dtype=np.uint8)
             mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
         return mask
 

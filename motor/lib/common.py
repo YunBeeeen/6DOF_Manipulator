@@ -27,10 +27,10 @@ def float_to_u16(x: float, xmin: float, xmax: float) -> int:
 def u16_to_float(u: int, xmin: float, xmax: float) -> float:
     return xmin + (u / 65535.0) * (xmax - xmin)
 
-def epscan_from_ms(period_ms: int, *, zero_based: bool = False) -> int:
+def epscan_from_ms(period_ms: int, *, zero_based: bool = True) -> int:
     if period_ms < 10 or (period_ms - 10) % 5 != 0:
         raise ValueError("period_ms는 10ms부터 5ms 단위(10,15,20,...)만 지원")
-    n = (period_ms - 10) // 5  # manual: 1->10ms, 2->15ms, ...
+    n = (period_ms - 10) // 5  # 0->10ms 기준
     return n if zero_based else n + 1
 
 

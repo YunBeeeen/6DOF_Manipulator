@@ -43,9 +43,6 @@ PARAMS: dict[str, ParamDef] = {
     "zero_sta":      ParamDef(0x7029, "uint8",  "W"),
     "damper":        ParamDef(0x702A, "uint8",  "W/R"),
     "add_offset":    ParamDef(0x702B, "float",  "W/R"),
-    "alveolous_open": ParamDef(0x702C, "uint8", "W/R"),  # RS05 cogging compensation switch
-    "iq_test":       ParamDef(0x702D, "uint8",  "W/R"),  # RS05 motor initialization calibration
-    "dcc_set":       ParamDef(0x702E, "float",  "W/R"),  # RS05 PP-mode deceleration
 
     # aliases
     "q_vel":         ParamDef(0x701B, "float",  "R"),
