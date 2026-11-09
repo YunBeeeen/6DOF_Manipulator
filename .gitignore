@@ -108,3 +108,11 @@ data/state_store.db/
 # RL 학습 출력 / 롤아웃 데이터 (재현 가능, 공유 시 드라이브)
 outputs/
 src/mujoco_phase_rl/outputs/
+# Portfolio: generated measurements and experiment files stay local
+contact_detection/real_logs/
+motor/diag_report_*.xlsx
+frames_*.gv
+frames_*.pdf
+/checkpoints/
+/logs/
+data/slot_cache/
