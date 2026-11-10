@@ -6,6 +6,29 @@ RGB 이미지와 자연어 명령으로 조작할 객체와 공간 관계를 해
 
 [시스템 구성](#시스템-구성) · [코드 구조](#코드-구조) · [실행 방법](#실행-방법) · [상세 실행 안내](docs/QUICKSTART.md)
 
+## 사진 및 시스템 흐름
+
+![객체 중심 조작 실물 실험 환경](docs/media/experiment.png)
+
+자체 제작한 6-DoF 로봇팔과 카메라를 사용하는 물체 조작 실험 환경입니다.
+
+### 인식·명령·제어 파이프라인
+
+![객체 중심 인식에서 로봇팔 제어까지의 시스템 구성](docs/media/system.png)
+
+### 공간 관계 기반 대상 선택
+
+![Query와 Object Token의 cross-attention 기반 대상 선택](docs/media/object-grounding.png)
+
+명령에서 구성한 Query와 객체별 Token을 결합해 조작 대상을 선택합니다.
+
+### Pick-and-Place FSM
+
+![접근·파지·운반·배치 및 오류 복구 상태 전이](docs/media/task-fsm.png)
+
+선택한 객체를 접근·파지·운반·배치 단계로 연결합니다. 그림은 시스템 설계를 설명하며, 실제 비전 입력을 사용하는 전체 시스템의 일반화 성능은 별도 검증이 필요합니다.
+
+
 ## 주요 기능
 
 - **객체 중심 인식**: ResNet18과 Transformer decoder로 객체 슬롯, 존재 여부, 위치, 방향 추정
